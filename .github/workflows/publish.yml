@@ -1,0 +1,40 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Test the package without editing the release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/zig-0.16.0
+          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}
+      - name: Install Zig
+        run: bash scripts/ci-setup.sh
+      - name: Run tests
+        run: bash scripts/run-tests.sh
+      - name: Check generated
+        run: bash scripts/check-generated.sh
+      - name: Publish
+        env:
+          ZIG_REGISTRY_TOKEN: ${{ secrets.ZIG_REGISTRY_TOKEN }}
+        run: bash scripts/publish.sh
