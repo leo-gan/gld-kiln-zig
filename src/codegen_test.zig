@@ -111,18 +111,32 @@ test "generated structs round-trip" {
         \\}
     ;
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = "/tmp/kiln-driver.zig", .data = driver });
-    const result = try std.process.run(gpa, io, .{
-        .argv = &.{
-            "/home/leo/.local/zig/zig",
-            "test",
-            "--dep",
-            "kiln",
-            "-Mroot=/tmp/kiln-driver.zig",
-            "-Mkiln=/home/leo/PycharmProjects/GLD/gld-kiln-zig/src/root.zig",
-            "--cache-dir",
-            "/tmp/kiln-zig-cache",
-        },
-    });
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd_len = try std.process.currentPath(io, &cwd_buf);
+    const kiln_src = try std.fmt.allocPrint(gpa, "{s}/src/root.zig", .{cwd_buf[0..cwd_len]});
+    defer gpa.free(kiln_src);
+    const kiln_mod = try std.fmt.allocPrint(gpa, "-Mkiln={s}", .{kiln_src});
+    defer gpa.free(kiln_mod);
+    const bins = [_][]const u8{ "zig", "/home/leo/.local/zig/zig", "/home/runner/zig-0.16.0/zig" };
+    var result: std.process.RunResult = undefined;
+    var ran = false;
+    for (bins) |bin| {
+        result = std.process.run(gpa, io, .{
+            .argv = &.{
+                bin,
+                "test",
+                "--dep",
+                "kiln",
+                "-Mroot=/tmp/kiln-driver.zig",
+                kiln_mod,
+                "--cache-dir",
+                "/tmp/kiln-zig-cache",
+            },
+        }) catch continue;
+        ran = true;
+        break;
+    }
+    if (!ran) return error.TestExpectedError;
     defer gpa.free(result.stdout);
     defer gpa.free(result.stderr);
     if (result.term != .exited or result.term.exited != 0) {
