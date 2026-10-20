@@ -1,7 +1,7 @@
 //! Positional little-endian Kiln codec for Zig.
 const std = @import("std");
 
-pub const version = "0.1.0";
+pub const version = "0.2.0";
 pub const default_cap = @import("limit.zig").default_cap;
 pub const Error = @import("error.zig").Error;
 pub const errorName = @import("error.zig").name;
