@@ -1,0 +1,23 @@
+# Local notes and scratch. Never commit.
+temp/
+
+# Secrets. Never commit.
+.env
+.env.*
+!.env.example
+
+# Zig
+.zig-cache/
+zig-out/
+
+# Generated examples
+examples/generated/
+
+# MkDocs
+site/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
