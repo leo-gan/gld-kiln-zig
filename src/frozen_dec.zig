@@ -1,6 +1,7 @@
 //! Decode one Frozen value. Containers are checked before their storage is allocated.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Error = @import("error.zig").Error;
 const Schema = @import("schema.zig").Schema;
 const minSize = @import("schema.zig").minSize;
@@ -12,10 +13,15 @@ const FieldValue = @import("value.zig").FieldValue;
 const DictEntry = @import("value.zig").DictEntry;
 const decodeTensors = @import("tensor_dec.zig").decodeTensors;
 const typeHash = @import("hashing.zig").typeHash;
+const PodList = @import("value.zig").PodList;
+const bulk = @import("bulk.zig").copy;
+
+const Pod = enum { f32, f64, i32, i64, u32, u64 };
 
 const str_schema = Schema{ .kind = .str };
 
 pub fn decode(gpa: std.mem.Allocator, schema: *const Schema, buf: []const u8, opts: Options) Error!Value {
+    if (opts.reuse) |reuse| reuse.reset(gpa);
     var reader = Reader.init(buf, opts);
     const value = try readValue(&reader, gpa, schema, 0);
     if (opts.standalone and reader.i != buf.len) {
@@ -31,6 +37,7 @@ pub fn decodeFramed(gpa: std.mem.Allocator, schema: *const Schema, buf: []const 
     if (!std.mem.eql(u8, buf[0..4], "KLN0") or !std.mem.allEqual(u8, buf[4..8], 0)) return error.FRAME;
     const hash = std.mem.readInt(u64, buf[8..16], .little);
     if (hash != try typeHash(schema)) return error.SCHEMA;
+    if (opts.reuse) |reuse| reuse.reset(gpa);
     var reader = Reader.init(buf, opts);
     reader.i = 16;
     const value = try readValue(&reader, gpa, schema, 0);
@@ -78,6 +85,22 @@ fn readTensors(r: *Reader, gpa: std.mem.Allocator) Error!Value {
 }
 
 fn readList(r: *Reader, gpa: std.mem.Allocator, elem: *const Schema, depth: u32) Error!Value {
+    if (podOf(elem.kind)) |pod| {
+        const count = try r.listHeader(podWidth(pod));
+        if (count != 0 and depth >= limit.max_depth) return error.LIMIT;
+        const nbytes: usize = @intCast(try limit.mul(count, podWidth(pod)));
+        if (nbytes > r.buf.len - r.i) return error.EOF;
+        const src = r.buf[r.i..][0..nbytes];
+        r.i += nbytes;
+        return switch (pod) {
+            .f32 => readTyped(r, gpa, f32, src),
+            .f64 => readTyped(r, gpa, f64, src),
+            .i32 => readTyped(r, gpa, i32, src),
+            .i64 => readTyped(r, gpa, i64, src),
+            .u32 => readTyped(r, gpa, u32, src),
+            .u64 => readTyped(r, gpa, u64, src),
+        };
+    }
     const count = try r.listHeader(try minSize(elem));
     if (elem.kind == .u8) {
         if (count > r.remaining()) return error.EOF;
@@ -97,6 +120,80 @@ fn readList(r: *Reader, gpa: std.mem.Allocator, elem: *const Schema, depth: u32)
         filled += 1;
     }
     return .{ .list = items };
+}
+
+fn podOf(kind: @import("schema.zig").Kind) ?Pod {
+    return switch (kind) {
+        .f32 => .f32,
+        .f64 => .f64,
+        .i32 => .i32,
+        .i64, .int => .i64,
+        .u32 => .u32,
+        .u64, .uint => .u64,
+        else => null,
+    };
+}
+
+fn podWidth(pod: Pod) u64 {
+    return switch (pod) {
+        .f32, .i32, .u32 => 4,
+        .f64, .i64, .u64 => 8,
+    };
+}
+
+fn podValue(comptime T: type, items: []const T, owned: bool) Value {
+    const list = PodList(T){ .items = items, .owned = owned };
+    return switch (T) {
+        f32 => .{ .f32s = list },
+        f64 => .{ .f64s = list },
+        i32 => .{ .i32s = list },
+        i64 => .{ .i64s = list },
+        u32 => .{ .u32s = list },
+        u64 => .{ .u64s = list },
+        else => unreachable,
+    };
+}
+
+fn readTyped(r: *Reader, gpa: std.mem.Allocator, comptime T: type, src: []const u8) Error!Value {
+    if (src.len == 0) return podValue(T, &.{}, false);
+    const n = src.len / @sizeOf(T);
+    if (r.reuse) |reuse| {
+        const dest = try reuse.take(T, gpa, n);
+        if (comptime builtin.cpu.arch.endian() == .little) {
+            bulk(std.mem.sliceAsBytes(dest), src);
+        } else {
+            swapInto(T, dest, src);
+        }
+        return podValue(T, dest, false);
+    }
+    if (comptime builtin.cpu.arch.endian() == .little) {
+        if (@intFromPtr(src.ptr) % @alignOf(T) == 0) {
+            const aligned: []align(@alignOf(T)) const u8 = @alignCast(src);
+            return podValue(T, std.mem.bytesAsSlice(T, aligned), false);
+        }
+    }
+    const dest = try gpa.alloc(T, n);
+    errdefer gpa.free(dest);
+    if (comptime builtin.cpu.arch.endian() == .little) {
+        bulk(std.mem.sliceAsBytes(dest), src);
+    } else {
+        swapInto(T, dest, src);
+    }
+    return podValue(T, dest, true);
+}
+
+fn swapInto(comptime T: type, dest: []T, src: []const u8) void {
+    const Int = switch (T) {
+        f32, u32 => u32,
+        f64, u64 => u64,
+        i32 => i32,
+        i64 => i64,
+        else => unreachable,
+    };
+    for (dest, 0..) |*slot, i| {
+        const raw = src[i * @sizeOf(T) ..][0..@sizeOf(T)];
+        slot.* = @bitCast(std.mem.readInt(Int, raw, .little));
+    }
 }
 
 fn readDict(r: *Reader, gpa: std.mem.Allocator, elem: *const Schema, depth: u32) Error!Value {

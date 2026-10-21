@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const Error = @import("error.zig").Error;
 const limit = @import("limit.zig");
 const Reader = @import("reader.zig").Reader;
+const bulk = @import("bulk.zig").copy;
 
 pub const Writer = struct {
     list: std.ArrayList(u8) = .empty,
@@ -16,7 +17,9 @@ pub const Writer = struct {
     }
 
     pub fn reset(self: *Writer) void {
-        self.list.clearRetainingCapacity();
+        // Drop the length only. Clearing the bytes would store over the payload
+        // that the next memcpy replaces (4 MiB for a 1,048,576-float list).
+        self.list.items.len = 0;
         self.depth = 0;
     }
 
@@ -29,7 +32,9 @@ pub const Writer = struct {
     }
 
     pub fn raw(self: *Writer, gpa: std.mem.Allocator, data: []const u8) Error!void {
-        try self.list.appendSlice(gpa, data);
+        if (data.len == 0) return;
+        const dest = try self.list.addManyAsSlice(gpa, data.len);
+        bulk(dest, data);
     }
 
     pub fn int(self: *Writer, gpa: std.mem.Allocator, comptime T: type, value: T) Error!void {
@@ -54,7 +59,7 @@ pub const Writer = struct {
         const len = std.math.cast(u32, value.len) orelse return error.LIMIT;
         const dest = try self.list.addManyAsSlice(gpa, 4 + value.len);
         std.mem.writeInt(u32, dest[0..4], len, .little);
-        @memcpy(dest[4..], value);
+        bulk(dest[4..], value);
     }
 
     pub fn str(self: *Writer, gpa: std.mem.Allocator, value: []const u8) Error!void {
