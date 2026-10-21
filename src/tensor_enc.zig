@@ -6,6 +6,7 @@ const limit = @import("limit.zig");
 const Tensor = @import("value.zig").Tensor;
 const Writer = @import("writer.zig").Writer;
 const t = @import("tensor.zig");
+const bulk = @import("bulk.zig").copy;
 
 pub fn encodeTensors(gpa: std.mem.Allocator, tensors: []const Tensor) Error![]u8 {
     var writer = Writer{};
@@ -40,6 +41,8 @@ pub fn encodeTensorsTo(writer: *Writer, gpa: std.mem.Allocator, tensors: []const
     const block = try limit.add(payload_base, payload_bytes);
     const dest = try writer.list.addManyAsSlice(gpa, std.math.cast(usize, block) orelse return error.LIMIT);
     const prefix: usize = @intCast(payload_base);
+    // Header, descriptors, name heap, and the alignment gap. The payload is
+    // copied next; do not wipe those bytes first.
     @memset(dest[0..prefix], 0);
     @memcpy(dest[0..4], "KLNT");
     dest[4] = 2;
@@ -98,7 +101,7 @@ pub fn encodeTensorsTo(writer: *Writer, gpa: std.mem.Allocator, tensors: []const
             @memset(dest[gap_at..gap_end], 0);
         }
         const at: usize = @intCast(payload_base + off);
-        @memcpy(dest[at..][0..tensor.data.len], tensor.data);
+        bulk(dest[at..][0..tensor.data.len], tensor.data);
         payload_cursor = off + tensor.data.len;
     }
 }
@@ -130,6 +133,24 @@ test "empty directory and one f32 vector" {
     const again = try encodeTensors(gpa, directory.tensors);
     defer gpa.free(again);
     try std.testing.expectEqualSlices(u8, encoded, again);
+}
+
+test "reused directory overwrites the previous payload" {
+    const gpa = std.testing.allocator;
+    var shape = [_]u64{0} ** 8;
+    shape[0] = 4;
+    const first_data = [_]u8{0x11} ** 16;
+    const second_data = [_]u8{0x22} ** 16;
+    const first = [_]Tensor{.{ .dtype = 2, .rank = 1, .shape = shape, .data = &first_data }};
+    const second = [_]Tensor{.{ .dtype = 2, .rank = 1, .shape = shape, .data = &second_data }};
+    var writer = @import("writer.zig").Writer{};
+    defer writer.deinit(gpa);
+    try encodeTensorsTo(&writer, gpa, &first);
+    writer.reset();
+    try encodeTensorsTo(&writer, gpa, &second);
+    var slot: [1]Tensor = undefined;
+    _ = try @import("tensor_dec.zig").decodeTensorsInto(writer.slice(), &slot, .{});
+    try std.testing.expectEqualSlices(u8, &second_data, slot[0].data);
 }
 
 test "payload overflow does not allocate" {

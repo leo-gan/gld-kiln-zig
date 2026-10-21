@@ -2,7 +2,9 @@
 
 Frozen values are positional. The schema stays in the program. Dict keys are sorted by their UTF-8 bytes so two encodes of the same mapping match. Floats keep every bit, including the sign of zero and the payload of a NaN.
 
-The tensor directory is one Frozen value. Its magic is `KLNT` and its version byte is 2. Descriptors are 128 bytes. Payloads start at a multiple of 64 from the start of the directory. A borrowed read returns a slice of the caller's buffer. Numeric payloads are copied with one `memcpy` on a little-endian host.
+The tensor directory is one Frozen value. Its magic is `KLNT` and its version byte is 2. Descriptors are 128 bytes. Payloads start at a multiple of 64 from the start of the directory. A borrowed read returns a slice of the caller's buffer. Numeric payloads are copied with one `memcpy` on a little-endian host. Only the header and alignment gaps are zeroed; payload bytes are not cleared before that copy.
+
+`list<f32>`, `list<f64>`, `list<i32>`, `list<u32>`, `list<i64>`, `list<int>`, `list<u64>`, and `list<uint>` accept a primitive slice (`f32s`, `f64s`, `i32s`, `u32s`, `i64s`, `u64s`). The element width is the schema width: a `u32` slice is four bytes and is not written as eight-byte integers. On decode, an aligned little-endian body is borrowed from the input. Pass `ListReuse` in `Options.reuse` to copy into one buffer that is kept across calls instead of allocating on every decode. `Writer.reset` keeps the allocation and does not wipe the previous payload.
 
 A count is checked against the unread bytes before Kiln allocates storage for the elements. The default cap is 16,777,216 counts and 16 MiB for one string or byte run. Pass `cap` on `Options` to raise it.
 

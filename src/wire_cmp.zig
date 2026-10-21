@@ -42,8 +42,34 @@ fn sameFloat(got: Value, n: f64) bool {
 }
 
 fn sameList(got: Value, items: []const std.json.Value) bool {
-    if (got != .list or got.list.len != items.len) return false;
-    for (got.list, items) |item, want| if (!same(item, want)) return false;
+    switch (got) {
+        .list => |xs| {
+            if (xs.len != items.len) return false;
+            for (xs, items) |item, want| if (!same(item, want)) return false;
+            return true;
+        },
+        .f32s => |pod| return sameScalars(f32, pod.items, items),
+        .f64s => |pod| return sameScalars(f64, pod.items, items),
+        .i32s => |pod| return sameScalars(i32, pod.items, items),
+        .i64s => |pod| return sameScalars(i64, pod.items, items),
+        .u32s => |pod| return sameScalars(u32, pod.items, items),
+        .u64s => |pod| return sameScalars(u64, pod.items, items),
+        else => return false,
+    }
+}
+
+fn sameScalars(comptime T: type, xs: []const T, items: []const std.json.Value) bool {
+    if (xs.len != items.len) return false;
+    for (xs, items) |item, want| {
+        const value: Value = switch (T) {
+            f32 => .{ .f32 = item },
+            f64 => .{ .f64 = item },
+            i32, i64 => .{ .int = @as(i64, item) },
+            u32, u64 => .{ .uint = @as(u64, item) },
+            else => unreachable,
+        };
+        if (!same(value, want)) return false;
+    }
     return true;
 }
 

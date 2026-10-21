@@ -4,12 +4,16 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Error = @import("error.zig").Error;
 const limit = @import("limit.zig");
+const ListReuse = @import("value.zig").ListReuse;
+const bulk = @import("bulk.zig").copy;
 
 pub const Options = struct {
     cap: u64 = limit.default_cap,
     standalone: bool = true,
     check_utf8: bool = true,
     check_quant: bool = true,
+    /// When set, numeric lists are copied here instead of borrowed.
+    reuse: ?*ListReuse = null,
 };
 
 pub const Reader = struct {
@@ -19,6 +23,7 @@ pub const Reader = struct {
     check_utf8: bool = true,
     check_quant: bool = true,
     depth: u32 = 0,
+    reuse: ?*ListReuse = null,
 
     pub fn init(buf: []const u8, opts: Options) Reader {
         return .{
@@ -26,6 +31,7 @@ pub const Reader = struct {
             .cap = opts.cap,
             .check_utf8 = opts.check_utf8,
             .check_quant = opts.check_quant,
+            .reuse = opts.reuse,
         };
     }
 
@@ -101,7 +107,7 @@ pub const Reader = struct {
         if (nbytes > self.remaining()) return error.EOF;
         if (comptime builtin.cpu.arch.endian() == .little) {
             const raw = std.mem.sliceAsBytes(dest);
-            @memcpy(raw, self.buf[self.i..][0..raw.len]);
+            bulk(raw, self.buf[self.i..][0..raw.len]);
             self.i += raw.len;
             return;
         }
@@ -113,7 +119,7 @@ pub const Reader = struct {
         if (nbytes > self.remaining()) return error.EOF;
         if (comptime builtin.cpu.arch.endian() == .little) {
             const raw = std.mem.sliceAsBytes(dest);
-            @memcpy(raw, self.buf[self.i..][0..raw.len]);
+            bulk(raw, self.buf[self.i..][0..raw.len]);
             self.i += raw.len;
             return;
         }
@@ -125,7 +131,7 @@ pub const Reader = struct {
         if (nbytes > self.remaining()) return error.EOF;
         if (comptime builtin.cpu.arch.endian() == .little) {
             const raw = std.mem.sliceAsBytes(dest);
-            @memcpy(raw, self.buf[self.i..][0..raw.len]);
+            bulk(raw, self.buf[self.i..][0..raw.len]);
             self.i += raw.len;
             return;
         }
