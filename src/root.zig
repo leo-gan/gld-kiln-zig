@@ -1,7 +1,7 @@
 //! Positional little-endian Kiln codec for Zig.
 const std = @import("std");
 
-pub const version = "0.2.0";
+pub const version = "0.2.1";
 pub const default_cap = @import("limit.zig").default_cap;
 pub const Error = @import("error.zig").Error;
 pub const errorName = @import("error.zig").name;
@@ -26,6 +26,14 @@ pub const decode = @import("frozen_dec.zig").decode;
 pub const encodeFramed = @import("frozen_enc.zig").encodeFramed;
 pub const decodeFramed = @import("frozen_dec.zig").decodeFramed;
 pub const encodeReuse = @import("frozen_enc.zig").encodeReuse;
+pub const minWireSize = @import("typed.zig").minWireSize;
+pub const encodedSize = @import("typed.zig").encodedSize;
+pub const writeTypedUnchecked = @import("typed.zig").writeTypedUnchecked;
+pub const encodeTypedInto = @import("typed.zig").encodeTypedInto;
+pub const encodeTypedReuse = @import("typed.zig").encodeTypedReuse;
+pub const encodeTyped = @import("typed.zig").encodeTyped;
+pub const decodeTyped = @import("typed.zig").decodeTyped;
+pub const readTyped = @import("typed.zig").readTyped;
 pub const encodeTensors = @import("tensor_enc.zig").encodeTensors;
 pub const encodeTensorsTo = @import("tensor_enc.zig").encodeTensorsTo;
 pub const decodeTensors = @import("tensor_dec.zig").decodeTensors;
@@ -48,4 +56,5 @@ test {
     _ = @import("wire_test.zig");
     _ = @import("schema_json.zig");
     _ = @import("codegen_test.zig");
+    _ = @import("typed.zig");
 }
