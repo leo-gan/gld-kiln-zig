@@ -85,8 +85,34 @@ pub const Reader = struct {
 
     pub fn str(self: *Reader) Error![]const u8 {
         const raw = try self.bytes();
-        if (self.check_utf8 and !std.unicode.utf8ValidateSlice(raw)) return error.UTF8;
+        if (self.check_utf8 and !utf8Valid(raw)) return error.UTF8;
         return raw;
+    }
+
+    /// Fast ASCII-first UTF-8 check; falls back to full validation at the first non-ASCII byte.
+    fn utf8Valid(raw: []const u8) bool {
+        var i: usize = 0;
+        const Vec = @Vector(16, u8);
+        const hi: Vec = @splat(0x80);
+        while (i + 16 <= raw.len) : (i += 16) {
+            const chunk: Vec = raw[i..][0..16].*;
+            if (@reduce(.Or, chunk & hi) != 0) {
+                return std.unicode.utf8ValidateSlice(raw[i..]);
+            }
+        }
+        if (i + 8 <= raw.len) {
+            const word = std.mem.readInt(u64, raw[i..][0..8], .little);
+            if ((word & 0x8080_8080_8080_8080) != 0) {
+                return std.unicode.utf8ValidateSlice(raw[i..]);
+            }
+            i += 8;
+        }
+        var acc: u8 = 0;
+        for (raw[i..]) |b| acc |= b;
+        if ((acc & 0x80) != 0) {
+            return std.unicode.utf8ValidateSlice(raw[i..]);
+        }
+        return true;
     }
 
     pub fn optTag(self: *Reader) Error!bool {

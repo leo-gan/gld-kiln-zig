@@ -66,8 +66,8 @@ pub fn writeValue(w: *Writer, gpa: std.mem.Allocator, schema: *const Schema, val
         .list => try writeList(w, gpa, schema.child.?, value, depth),
         .dict => try writeDict(w, gpa, schema.child.?, value, depth),
         .structure => {
-            for (schema.fields) |field| {
-                try writeValue(w, gpa, field.schema, try lookup(value.structure, field.name), depth + 1);
+            for (schema.fields, 0..) |field, idx| {
+                try writeValue(w, gpa, field.schema, try lookupAt(value.structure, idx, field.name), depth + 1);
             }
         },
     }
@@ -179,7 +179,8 @@ fn writeDict(w: *Writer, gpa: std.mem.Allocator, elem: *const Schema, value: Val
     }
 }
 
-fn lookup(fields: []const FieldValue, name: []const u8) Error!Value {
+fn lookupAt(fields: []const FieldValue, idx: usize, name: []const u8) Error!Value {
+    if (idx < fields.len and std.mem.eql(u8, fields[idx].name, name)) return fields[idx].value;
     for (fields) |field| if (std.mem.eql(u8, field.name, name)) return field.value;
     return error.TYPE;
 }
